@@ -34,122 +34,51 @@ Tracing: Langfuse (ClickHouse, Redis, S3)
 
 | Area | Used |
 |---|---|
-| Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, AWS Amplify (auth), react-pdf, react-markdown |
-| Backend | Python 3.13, FastAPI, SQLAlchemy, Alembic, boto3 |
-| Documents | Docling (layout, tables, OCR with Apple Vision), pypdf |
-| Search | Postgres 17 with pgvector (HNSW), BM25 in SQL, reciprocal rank fusion |
-| Models | Any OpenAI-compatible API; locally LM Studio with Qwen3 (chat) and Qwen3-Embedding (embeddings) |
-| AWS | Cognito, S3, EventBridge, SQS with a dead-letter queue, IAM; emulated locally by Floci |
-| Infrastructure | Terraform, Docker Compose |
-| Tracing | Langfuse (self-hosted, with ClickHouse and Redis) |
-
-## Repository
-
-| Path | What |
-|---|---|
-| `infrastructure/` | Floci (local AWS) and the Terraform that creates Cognito, the S3 buckets, the EventBridge rule and the SQS queues. |
-| `backend/` | FastAPI API and indexing worker, with Postgres and Langfuse in Docker Compose. |
-| `frontend/` | Next.js app. |
-
-Each folder has its own README with the details of running and configuring it.
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4, AWS Amplify, react-pdf |
+| Backend | Python 3.13, FastAPI, SQLAlchemy, Alembic, Docling |
+| Data | Postgres 17 with pgvector |
+| AWS | Cognito, S3, EventBridge, SQS, emulated locally by Floci |
+| Models | LM Studio with Qwen3 and Qwen3-Embedding (any OpenAI-compatible API) |
+| Tooling | Terraform, Docker Compose, Langfuse |
 
 ## Running locally
 
-You need Docker, Terraform (>= 1.16.5), conda, Node.js and LM Studio. The steps below start everything in order. Each app's README covers its own setup in more detail.
+You need Docker, Terraform (>= 1.16.5), conda, Node.js and LM Studio. Each step links to the README with the details. All paths are from the repository root.
 
-### 1. LM Studio
+1. **LM Studio.** Load an LLM with structured output support and at least 16k context, plus an embedding model (defaults: `qwen/qwen3.8-27b` and `text-embedding-qwen3-embedding-8b`, roughly 32 GB of memory together). Start the server on port 1234 and check that `curl localhost:1234/v1/models` lists both ids.
 
-The backend calls LM Studio for chat and embeddings. Before starting the backend:
+2. **Floci and the AWS resources** ([infrastructure/README.md](infrastructure/README.md)). Terraform already targets Floci; the `export` is only for the AWS CLI.
 
-- Download an LLM and an embedding model. The defaults in `backend/.env.example` are `qwen/qwen3.8-27b` and `text-embedding-qwen3-embedding-8b`. You can use others, as long as you set their ids in `backend/.env`.
-- The LLM must support structured output (JSON schema). Qwen3 models do.
-- Give the LLM a context length of at least 16k tokens. A prompt carries up to about 6,000 tokens of sources plus the instructions and the answer.
-- Load both models at once, or turn on just-in-time model loading.
-- Start the local server (Developer tab, Start Server) on port 1234. `curl http://localhost:1234/v1/models` should list both ids exactly as they appear in `backend/.env`.
+   ```bash
+   cd infrastructure && docker compose up -d --wait
+   export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
+   cd terraform/local && terraform init && terraform apply
+   ```
 
-The default models need roughly 32 GB of memory together. Smaller models work, with weaker answers.
+3. **Configuration.** Copy the templates, put the `terraform output` values into `backend/.env` and `frontend/.env.local`, and replace each `CHANGEME` with a generated secret. The app READMEs list every value.
 
-### 2. Floci
+   ```bash
+   cp backend/.env.example backend/.env
+   cp backend/docker/postgres/postgres.env.example backend/docker/postgres/postgres.env
+   cp backend/docker/langfuse/langfuse.env.example backend/docker/langfuse/langfuse.env
+   cp frontend/.env.example frontend/.env.local
+   ```
 
-From the repository root:
+4. **Backend** ([backend/README.md](backend/README.md)). Start the worker in a second terminal, or uploads stay `processing`.
 
-```bash
-cd infrastructure
-docker compose up -d --wait        # Floci on :4566, its UI on http://localhost:4500
-```
+   ```bash
+   cd backend && docker compose up -d --wait     # Postgres, Langfuse on :3001
+   conda create -n rag-backend python=3.13 && conda activate rag-backend
+   pip install -r requirements.txt
+   alembic upgrade head
+   fastapi dev main.py                           # API on :8000
+   python -m app.worker                          # second terminal
+   ```
 
-### 3. AWS resources (Terraform)
+5. **Frontend** ([frontend/README.md](frontend/README.md)).
 
-Terraform already points at Floci and uses its dummy credentials, so it needs no AWS configuration. To inspect the resources with the AWS CLI afterwards, point the CLI at Floci in the same shell:
+   ```bash
+   cd frontend && npm install && npm run dev     # http://localhost:3000
+   ```
 
-```bash
-export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
-```
-
-Then create the resources:
-
-```bash
-cd terraform/local
-terraform init
-terraform apply
-terraform output
-```
-
-### 4. Configure the apps
-
-Copy the templates, from the repository root:
-
-```bash
-cp backend/.env.example backend/.env
-cp backend/docker/postgres/postgres.env.example backend/docker/postgres/postgres.env
-cp backend/docker/langfuse/langfuse.env.example backend/docker/langfuse/langfuse.env
-cp frontend/.env.example frontend/.env.local
-```
-
-Then fill them in:
-
-- Put the Terraform outputs (Cognito pool and client ids, bucket name, queue URL) into `backend/.env` and `frontend/.env.local`. The table in `infrastructure/README.md` shows which output goes where.
-- Replace every `CHANGEME` in `postgres.env` and `langfuse.env` with a generated secret (`openssl rand -hex 32`). The Postgres password also goes into `DATABASE_URL` in `backend/.env`, and Langfuse's database password into `DATABASE_URL` in `langfuse.env`.
-- Choose the Langfuse project keys in `langfuse.env` (`LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-...`, `LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-...`) and copy the same values into `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `backend/.env`.
-
-`backend/README.md` describes each setting.
-
-### 5. Backend
-
-From the repository root:
-
-```bash
-cd backend
-docker compose up -d --wait        # Postgres on :5432, Langfuse on http://localhost:3001
-conda create -n rag-backend python=3.13
-conda activate rag-backend
-pip install -r requirements.txt
-alembic upgrade head               # create the database tables
-fastapi dev main.py                # API on http://127.0.0.1:8000
-```
-
-In a second terminal, from `backend/` with the same conda env, start the indexing worker. Without it, uploaded documents stay in `processing`.
-
-```bash
-python -m app.worker
-```
-
-The first document you index downloads Docling's models and the tokenizer (about 500 MB) into `backend/.cache/`.
-
-### 6. Frontend
-
-From the repository root:
-
-```bash
-cd frontend
-npm install
-npm run dev                        # http://localhost:3000
-```
-
-Open http://localhost:3000 and register. Floci doesn't send emails; the confirmation code is listed at http://localhost.floci.io:4566/_aws/ses.
-
-## Tests
-
-```bash
-cd backend && pytest               # no database or model server needed
-```
+   Register, then take the confirmation code from http://localhost.floci.io:4566/_aws/ses (Floci doesn't send emails).
