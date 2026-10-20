@@ -23,11 +23,12 @@ htmlcov/
 .venv/
 venv/
 
-# Backend: model downloads and local service data
+# Backend: model downloads
 backend/.cache/
-backend/docker/postgres_data/
-backend/docker/clickhouse_data/
-backend/docker/redis_data/
+
+# Docker bind-mounted volumes (service data)
+**/docker/*_data/
+**/floci-data/
 
 # Frontend (more rules in frontend/.gitignore)
 node_modules/
@@ -36,3 +37,26 @@ node_modules/
 
 # Agent scratch
 .superpowers/
+
+# Terraform: provider cache, state, plans, crash logs, local overrides.
+# .terraform.lock.hcl is committed (pins provider versions).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# Variable files can hold secrets.
+*.tfvars
+*.tfvars.json
+
+# Working docs (design notes, plans, frontend/backend handovers): local only
+backend/docs/
+frontend/docs/

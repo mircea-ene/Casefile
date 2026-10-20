@@ -191,17 +191,8 @@ export function ChatPanel({
               </li>
             ))}
             {pending && (
-              <li className="flex items-center gap-2.5 text-sm text-muted" role="status">
-                <span aria-hidden="true" className="flex gap-1">
-                  {[0, 150, 300].map((delay) => (
-                    <span
-                      key={delay}
-                      style={{ animationDelay: `${delay}ms` }}
-                      className="size-1.5 rounded-full bg-brand/60 motion-safe:animate-pulse"
-                    />
-                  ))}
-                </span>
-                Searching your documents…
+              <li>
+                <PendingNotice />
               </li>
             )}
           </ol>
@@ -264,6 +255,38 @@ export function ChatPanel({
           </p>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Answers can take a minute or two now that whole sections go to the model, so after a few
+// seconds the notice says what's happening and how long it has been. There's no client timeout.
+function PendingNotice() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-muted" role="status">
+      <span aria-hidden="true" className="flex gap-1">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            style={{ animationDelay: `${delay}ms` }}
+            className="size-1.5 rounded-full bg-brand/60 motion-safe:animate-pulse"
+          />
+        ))}
+      </span>
+      {seconds < 8 ? "Searching your documents…" : "Reading the relevant sections…"}
+      {seconds >= 8 && (
+        <span aria-hidden="true" className="tabular-nums">
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+        </span>
+      )}
+      {seconds >= 30 && <span className="hidden sm:inline">Longer answers can take a minute or two.</span>}
     </div>
   );
 }

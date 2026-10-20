@@ -109,11 +109,58 @@ function LocationLine({ location, children }: { location: PassageLocation; child
   );
 }
 
-// Every passage the model was given, in retrieval order. Collapsed by default.
+const HEADING_SEPARATOR = " > ";
+
+type SourceGroup = {
+  key: string;
+  documentName: string;
+  section: string | null; // top-level section label, e.g. "2. VOTOCAST'S OBLIGATIONS"
+  sectionPath: string | null; // heading_path up to that section, as a tooltip
+  sources: Source[];
+};
+
+// Consecutive sources from the same document and top-level section (heading_path up to its
+// second part; the first part is the document's own title). Keeps the backend order: whole
+// sections come in document order, so their passages stay together.
+function groupBySection(sources: Source[]): SourceGroup[] {
+  const groups: SourceGroup[] = [];
+  for (const s of sources) {
+    const parts = s.heading_path?.split(HEADING_SEPARATOR) ?? [];
+    const sectionPath = parts.length ? parts.slice(0, 2).join(HEADING_SEPARATOR) : null;
+    const key = `${s.document_id}|${sectionPath ?? ""}`;
+    const last = groups.at(-1);
+    if (last?.key === key) {
+      last.sources.push(s);
+      continue;
+    }
+    groups.push({
+      key,
+      documentName: s.document_name,
+      section: parts.length ? parts[Math.min(1, parts.length - 1)] : null,
+      sectionPath,
+      sources: [s],
+    });
+  }
+  return groups;
+}
+
+// The rest of a source's heading path below its group's section, unless it only repeats the
+// `section` label the location line already shows.
+function subHeading(source: Source): string | null {
+  const parts = source.heading_path?.split(HEADING_SEPARATOR) ?? [];
+  const below = parts.length > 2 ? parts.slice(2).join(HEADING_SEPARATOR) : null;
+  return below === source.section ? null : below;
+}
+
+// Every passage the model was given. Collapsed by default; inside, the cited passages come
+// first, then the rest ("Also read"), each grouped by section in the order the model saw them.
+// Relevance bars compare against the best source overall but never reorder anything.
 function SourcesDisclosure({ sources }: { sources: Source[] }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const best = Math.max(...sources.map((s) => s.similarity)) || 1;
+  const cited = sources.filter((s) => s.citation != null);
+  const rest = sources.filter((s) => s.citation == null);
 
   return (
     <div className="mt-4">
@@ -128,44 +175,144 @@ function SourcesDisclosure({ sources }: { sources: Source[] }) {
           className={`size-4 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
         />
         Sources ({sources.length})
+        {cited.length > 0 && rest.length > 0 && (
+          <span className="font-normal">
+            {" "}
+            · {cited.length} cited
+          </span>
+        )}
       </button>
       {open && (
-        <ol id={id} className="mt-2 space-y-2.5">
-          {sources.map((s, i) => (
-            <li key={`${s.id}-${i}`} className="rounded-lg border border-rule bg-surface p-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <LocationLine location={s}>
-                  {s.citation != null && (
-                    <span className="rounded-full bg-brand/10 px-1.5 text-xs leading-5 font-semibold text-brand">
-                      Cited [{s.citation}]
-                    </span>
-                  )}
-                </LocationLine>
-                <Relevance value={s.similarity / best} />
-              </div>
-              {s.heading_path && (
-                <p className="mt-0.5 truncate text-xs text-muted" title={s.heading_path}>
-                  {s.heading_path}
-                </p>
-              )}
-              {s.element_type === "table" ? (
-                <Clamp collapsedClass="max-h-32" label="full table" className="mt-2">
-                  <pre className="overflow-x-auto font-mono text-xs leading-5">{s.content}</pre>
-                </Clamp>
-              ) : (
-                <Clamp
-                  collapsedClass="line-clamp-4"
-                  label="full passage"
-                  className="mt-2 font-serif leading-7 whitespace-pre-line"
-                >
-                  {s.content}
-                </Clamp>
-              )}
-            </li>
+        <div id={id} className="mt-2 space-y-5">
+          {cited.length > 0 && (
+            <SourceList
+              title={rest.length ? `Cited (${cited.length})` : null}
+              sources={cited}
+              best={best}
+              groupsOpen
+            />
+          )}
+          {rest.length > 0 && (
+            <SourceList
+              title={cited.length ? `Also read (${rest.length})` : null}
+              sources={rest}
+              best={best}
+              groupsOpen={false}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceList({
+  title,
+  sources,
+  best,
+  groupsOpen,
+}: {
+  title: string | null;
+  sources: Source[];
+  best: number;
+  groupsOpen: boolean;
+}) {
+  return (
+    <section>
+      {title && (
+        <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">{title}</h3>
+      )}
+      <ul className="space-y-2">
+        {groupBySection(sources).map((group, i) => (
+          <li key={`${group.key}-${i}`}>
+            <SectionGroup group={group} best={best} defaultOpen={groupsOpen} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function SectionGroup({
+  group,
+  best,
+  defaultOpen,
+}: {
+  group: SourceGroup;
+  best: number;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  const count = group.sources.length;
+
+  return (
+    <div className="rounded-lg border border-rule">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((o) => !o)}
+        title={group.sectionPath ?? undefined}
+        className="flex w-full items-start gap-1.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface"
+      >
+        <ChevronRightIcon
+          className={`mt-0.5 size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium break-words">{group.section ?? group.documentName}</span>
+          {group.section && (
+            <span className="block truncate text-xs text-muted">{group.documentName}</span>
+          )}
+        </span>
+        <span className="shrink-0 text-xs text-muted tabular-nums">
+          {count} {count === 1 ? "passage" : "passages"}
+        </span>
+      </button>
+      {open && (
+        <ol id={id} className="space-y-2 px-2 pb-2">
+          {group.sources.map((s, i) => (
+            <SourceCard key={`${s.id}-${i}`} source={s} best={best} />
           ))}
         </ol>
       )}
     </div>
+  );
+}
+
+function SourceCard({ source: s, best }: { source: Source; best: number }) {
+  const below = subHeading(s);
+  return (
+    <li className="rounded-md border border-rule bg-surface p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <LocationLine location={s}>
+          {s.citation != null && (
+            <span className="rounded-full bg-brand/10 px-1.5 text-xs leading-5 font-semibold text-brand">
+              Cited [{s.citation}]
+            </span>
+          )}
+        </LocationLine>
+        <Relevance value={s.similarity / best} />
+      </div>
+      {below && (
+        <p className="mt-0.5 truncate text-xs text-muted" title={s.heading_path ?? undefined}>
+          {below}
+        </p>
+      )}
+      {s.element_type === "table" ? (
+        <Clamp collapsedClass="max-h-32" label="full table" className="mt-2">
+          <pre className="overflow-x-auto font-mono text-xs leading-5">{s.content}</pre>
+        </Clamp>
+      ) : (
+        <Clamp
+          collapsedClass="line-clamp-4"
+          label="full passage"
+          className="mt-2 font-serif leading-7 whitespace-pre-line"
+        >
+          {s.content}
+        </Clamp>
+      )}
+    </li>
   );
 }
 

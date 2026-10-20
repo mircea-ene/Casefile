@@ -45,6 +45,8 @@ export type Source = PassageLocation & {
   content: string;
   similarity: number;
   citation: number | null; // the [n] in `answer` that cites this source
+  // "hit": found by search; "section": sent because the rest of its section was relevant
+  match: "hit" | "section";
 };
 
 export type ChatAnswer = {

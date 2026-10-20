@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Frontend for the Accelerise legal-document RAG app (product plan in `PLAN.md`). Built so far: Cognito login/register/confirm pages, a dashboard with chat history, Chat (answers with citations and a collapsible list of all retrieved sources), Documents panels and a PDF/image viewer that opens cited passages highlighted (other dashboard sections are "Soon" placeholders), and a `/profile` page. Tenant/organization handling is deliberately out of scope for now. "Casefile" is a placeholder product name.
+Frontend for the Accelerise legal-document RAG app. Built so far: Cognito login/register/confirm pages, a dashboard with chat history, Chat (answers with citations and a collapsible list of all retrieved sources), Documents panels and a PDF/image viewer that opens cited passages highlighted (other dashboard sections are "Soon" placeholders), and a `/profile` page. Tenant/organization handling is deliberately out of scope for now. "Casefile" is a placeholder product name.
 
 ## Architecture
 
