@@ -1,0 +1,38 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets (each has a committed .example template)
+.env
+.env.*
+!.env.example
+backend/docker/postgres/postgres.env
+backend/docker/langfuse/langfuse.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# Backend: model downloads and local service data
+backend/.cache/
+backend/docker/postgres_data/
+backend/docker/clickhouse_data/
+backend/docker/redis_data/
+
+# Frontend (more rules in frontend/.gitignore)
+node_modules/
+.next/
+*.tsbuildinfo
+
+# Agent scratch
+.superpowers/

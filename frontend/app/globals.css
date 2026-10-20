@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #1b2433;
+  --muted: #5b6577;
+  --rule: #dde1e8;
+  --brand: #1f3a5f;
+  --brand-ink: #ffffff;
+  --highlight: #fde68a;
+  --danger: #b42318;
+  --ok: #157f4f;
+  --popover-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px -4px rgb(16 24 40 / 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12161d;
+    --surface: #1a1f28;
+    --ink: #e6e9ef;
+    --muted: #9aa3b2;
+    --rule: #2a313d;
+    --brand: #9fbbe0;
+    --brand-ink: #12161d;
+    --highlight: #6b5a14;
+    --danger: #f97066;
+    --ok: #5fcf96;
+    --popover-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -6px rgb(0 0 0 / 0.6);
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-highlight: var(--highlight);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --shadow-pop: var(--popover-shadow);
+  --font-sans: var(--font-public-sans);
+  --font-serif: var(--font-source-serif);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-public-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 22%, transparent);
+}
+
+/* In the base layer so utilities like focus:outline-none can override it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+}
+
+/* Cited passages read like highlighter on a printed page. */
+.highlight {
+  background: linear-gradient(transparent 12%, var(--highlight) 12%, var(--highlight) 88%, transparent 88%);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0 0.15em;
+}

@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    container_name: casefile_postgres
+    env_file: ./docker/postgres/postgres.env  # POSTGRES_USER / _PASSWORD / _DB, LANGFUSE_DB_PASSWORD
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/postgres/init-langfuse.sh:/docker-entrypoint-initdb.d/init-langfuse.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U casefile_user -d casefile"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # LLM tracing: token usage per user / conversation / request. UI on http://localhost:3001
+  # (3000 is the frontend). Settings and secrets in docker/langfuse/langfuse.env.
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    restart: unless-stopped
+    container_name: casefile_langfuse_web
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: ./docker/langfuse/langfuse.env
+    extra_hosts: &floci-host
+      - "host.docker.internal:host-gateway"  # Floci (S3) runs outside this compose, on the host's :4566
+    environment:
+      # Presigned media uploads come from the browser/SDK, so they need the host address.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:4566
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://host.docker.internal:4566
+    ports:
+      - "3001:3000"
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    restart: unless-stopped
+    container_name: casefile_langfuse_worker
+    depends_on: *langfuse-depends-on
+    env_file: ./docker/langfuse/langfuse.env
+    extra_hosts: *floci-host
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.12
+    restart: unless-stopped
+    container_name: casefile_clickhouse
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+    env_file: ./docker/langfuse/langfuse.env  # CLICKHOUSE_USER / CLICKHOUSE_PASSWORD
+    volumes:
+      - ./docker/clickhouse_data:/var/lib/clickhouse
+      - ./docker/clickhouse/config.d/langfuse.xml:/etc/clickhouse-server/config.d/langfuse.xml:ro
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    ports:
+      - "8123:8123"
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    container_name: casefile_redis
+    env_file: ./docker/langfuse/langfuse.env  # REDIS_AUTH
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_AUTH\" --maxmemory-policy noeviction"]
+    volumes:
+      - ./docker/redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_AUTH\" --no-auth-warning ping | grep PONG"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
