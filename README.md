@@ -2,18 +2,21 @@
 
 Ask your contracts. Every answer is cited to the clause.
 
-Casefile is a document assistant for legal work. You upload contracts (PDF, DOCX, DOC, images, text), they are parsed and indexed clause by clause, and you ask questions in a chat. Each answer cites the passages it relies on, every citation is checked word for word against the source text, and clicking one opens the original PDF at that spot.
+Casefile answers questions about your contracts. You upload them (PDF, DOCX, DOC, images or plain text), Casefile parses and indexes them clause by clause, and you ask questions in a chat. Each answer cites the passages it relies on. Every citation is checked word for word against the source text, and clicking one opens the original PDF at that spot.
 
-## Features
+## How it works
 
-- **Clause-aware ingestion.** Docling extracts headings, paragraphs and tables with page positions; OCR runs only on regions without a text layer. Text is grouped into clauses by detecting clause numbers, not by fixed-size windows.
-- **Hybrid, hierarchical retrieval.** Vector search (pgvector, HNSW) and BM25 (computed in SQL) are fused with reciprocal rank fusion. Sections with several hits, or whose heading or number matches the question, are sent whole, so "what are X's obligations" gets every clause of that section.
-- **Verified citations.** The model returns an answer with `[n]` markers and a quote per source. Citations whose quote isn't found verbatim in the source are dropped; if none survive, the answer is reported as insufficient evidence instead.
-- **Source viewer.** Each source carries its page and bounding boxes; the frontend opens the original file (presigned S3 URL) at the cited section.
-- **Reliable indexing.** Upload to S3, EventBridge to SQS, and a worker that runs every job in its own process, extends message visibility while working, retries with back-off and dead-letters what keeps failing. Delivery is at least once, so indexing is idempotent.
-- **Chat history.** Conversations are saved with LLM-generated titles that the user can rename.
-- **Tracing.** Langfuse records every chat, indexing run and model call with token usage, per user and per conversation.
-- **Auth.** Cognito JWTs; every query is scoped to the caller.
+Docling extracts headings, paragraphs and tables along with their positions on the page. OCR runs only on regions that have no text layer. The text is then grouped into clauses by their clause numbers rather than cut into fixed-size windows.
+
+Retrieval combines vector search (pgvector, HNSW) with BM25, which is computed in SQL, and merges the two rankings with reciprocal rank fusion. A section is sent to the model whole when it has several hits or when its heading or number matches the question. A question like "what are X's obligations" therefore gets every clause of that section.
+
+The model answers with `[n]` markers and one quote per source. A citation is dropped if its quote can't be found verbatim in the source. If no citation is left, the response says there isn't enough evidence instead of answering.
+
+Each source comes with its page and bounding boxes, and the frontend uses them to open the original file (through a presigned S3 URL) at the cited section.
+
+Uploads go to S3, which sends an event through EventBridge to SQS. A worker runs each indexing job in its own process, extends the message's visibility while it works, retries with back-off and moves messages that keep failing to a dead-letter queue. SQS can deliver a message more than once, so indexing is idempotent.
+
+Conversations are saved, and the LLM gives each one a title that the user can rename. Langfuse traces every chat, indexing run and model call, with token usage per user and per conversation. Users sign in through Cognito, and every query only sees the caller's own documents.
 
 ## Architecture
 
@@ -38,8 +41,9 @@ Tracing: Langfuse (ClickHouse, Redis, S3)
 
 Requirements: Docker, conda, Node.js, [LM Studio](https://lmstudio.ai) with an LLM and an embedding model loaded, and Floci (local AWS) with the S3 buckets, SQS queues, EventBridge rule and Cognito pool already created (Terraform, not part of this repo).
 
+Backend, from the repository root:
+
 ```bash
-# Backend
 cd backend
 cp .env.example .env                                         # then fill in
 cp docker/postgres/postgres.env.example docker/postgres/postgres.env
@@ -50,8 +54,11 @@ pip install -r requirements.txt
 alembic upgrade head
 fastapi dev main.py                # API on http://127.0.0.1:8000
 python -m app.worker               # indexing worker, in a second terminal
+```
 
-# Frontend
+Frontend, from the repository root:
+
+```bash
 cd frontend
 cp .env.example .env.local
 npm install
