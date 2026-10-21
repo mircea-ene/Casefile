@@ -82,3 +82,15 @@ You need Docker, Terraform (>= 1.16.5), conda, Node.js and LM Studio. Each step 
    ```
 
    Register, then take the confirmation code from http://localhost.floci.io:4566/_aws/ses (Floci doesn't send emails).
+
+## Limitations
+
+- A verified citation proves that the quoted text exists in the source, not that the answer draws the right conclusion from it. The model can still misread a clause it quotes correctly.
+- Answer quality depends on the model. It has been run with a local Qwen3 27B, which can miss nuances that a larger model would catch.
+- Each question is answered on its own. The model doesn't see earlier turns, so follow-ups like "and what about the renewal term?" need to be asked in full.
+- There is no reranker yet. Retrieval is hybrid search with fixed rules for expanding sections.
+- Images and figures inside documents are skipped. Text in scanned pages is read by OCR, which defaults to Apple Vision and so only runs on macOS. Elsewhere, set `OCR_ENGINE=auto`.
+- Documents and models stay on your machine, but Langfuse stores the full prompts and answers, including contract text. Turn tracing off by leaving the Langfuse keys empty.
+- Every query is scoped to the signed-in user, but there are no tenants or row-level security in Postgres yet.
+- The AWS side has only been run against Floci, not real AWS.
+- Casefile is a personal project, not legal advice, and it hasn't been reviewed for production legal use.
