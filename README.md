@@ -30,16 +30,29 @@ LLM and embeddings: OpenAI-compatible API (LM Studio locally, Qwen3)
 Tracing: Langfuse (ClickHouse, Redis, S3)
 ```
 
-## Technologies
+## Evaluation
 
-| Area | Used |
-|---|---|
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4, AWS Amplify, react-pdf |
-| Backend | Python 3.13, FastAPI, SQLAlchemy, Alembic, Docling |
-| Data | Postgres 17 with pgvector |
-| AWS | Cognito, S3, EventBridge, SQS, emulated locally by Floci |
-| Models | LM Studio with Qwen3 and Qwen3-Embedding (any OpenAI-compatible API) |
-| Tooling | Terraform, Docker Compose, Langfuse |
+Retrieval was measured on [CUAD](https://www.atticusprojectai.org/cuad), a set of 510 commercial contracts in which lawyers marked the clauses for 41 categories. The eval uses 40 contracts of 5 to 30 pages from 25 contract types (589 pages in total) and 13 categories asked as plain questions ("Can either party terminate this agreement for convenience?"). That gives 520 questions, 249 of which have an answer in the contract. A question counts as retrieved when a lawyer-marked span ends up in the context sent to the model.
+
+| Setup | Gold clause in context | MRR@8 | Context tokens | Latency |
+|---|---|---|---|---|
+| Question names its contract, search over all 40 | 0.932 | 0.821 | 2,595 | 6.1 s |
+| Question scoped to its contract | 0.928 | 0.842 | 2,214 | 2.4 s |
+
+The analysis model resolves the named contract correctly 94% of the time. Latency was measured locally on LM Studio (Qwen3.5 9B for analysis, Qwen3-Embedding 8B). The 6.1 s average comes mostly from 18 questions on which the analysis model looped until it timed out.
+
+The harness is [`backend/app/evaluate.py`](backend/app/evaluate.py). The questions and the per-question results of every run are in [`backend/eval/`](backend/eval/). CUAD is by The Atticus Project, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+### Compared with the first version
+
+The first version searched the question as typed, with vector search and BM25 on the whole question, fused with RRF.
+
+| Setup | Gold in context, first version | Gold in context, now | MRR@8, first version | MRR@8, now |
+|---|---|---|---|---|
+| Question names its contract, search over all 40 | 0.667 | **0.932** | 0.215 | **0.821** |
+| Question scoped to its contract | **0.968** | 0.928 | 0.818 | **0.842** |
+
+Query analysis now picks the contract a question names and rewrites the question as the clause that would answer it, and BM25 runs only on clause numbers and exact terms. Across contracts this is a large gain: party names no longer pull in the preambles and signature blocks of other contracts. Within one contract it ranks the right clause slightly higher and sends 28% less context, but finds it about four points less often, because the rewrite sometimes drifts from the question.
 
 ## Running locally
 
@@ -83,29 +96,16 @@ You need Docker, Terraform (>= 1.16.5), conda, Node.js and LM Studio. Each step 
 
    Register, then take the confirmation code from http://localhost.floci.io:4566/_aws/ses (Floci doesn't send emails).
 
-## Evaluation
+## Technologies
 
-Retrieval was measured on [CUAD](https://www.atticusprojectai.org/cuad), a set of 510 commercial contracts in which lawyers marked the clauses for 41 categories. The eval uses 40 contracts of 5 to 30 pages from 25 contract types (589 pages in total) and 13 categories asked as plain questions ("Can either party terminate this agreement for convenience?"). That gives 520 questions, 249 of which have an answer in the contract. A question counts as retrieved when a lawyer-marked span ends up in the context sent to the model.
-
-| Setup | Gold clause in context | MRR@8 | Context tokens | Latency |
-|---|---|---|---|---|
-| Question names its contract, search over all 40 | 0.932 | 0.821 | 2,595 | 6.1 s |
-| Question scoped to its contract | 0.928 | 0.842 | 2,214 | 2.4 s |
-
-The analysis model resolves the named contract correctly 94% of the time. Latency was measured locally on LM Studio (Qwen3.5 9B for analysis, Qwen3-Embedding 8B). The 6.1 s average comes mostly from 18 questions on which the analysis model looped until it timed out.
-
-The harness is [`backend/app/evaluate.py`](backend/app/evaluate.py). The questions and the per-question results of every run are in [`backend/eval/`](backend/eval/). CUAD is by The Atticus Project, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-
-### Compared with the first version
-
-The first version searched the question as typed, with vector search and BM25 on the whole question, fused with RRF.
-
-| Setup | Gold in context, first version | Gold in context, now | MRR@8, first version | MRR@8, now |
-|---|---|---|---|---|
-| Question names its contract, search over all 40 | 0.667 | **0.932** | 0.215 | **0.821** |
-| Question scoped to its contract | **0.968** | 0.928 | 0.818 | **0.842** |
-
-Query analysis now picks the contract a question names and rewrites the question as the clause that would answer it, and BM25 runs only on clause numbers and exact terms. Across contracts this is a large gain: party names no longer pull in the preambles and signature blocks of other contracts. Within one contract it ranks the right clause slightly higher and sends 28% less context, but finds it about four points less often, because the rewrite sometimes drifts from the question.
+| Area | Used |
+|---|---|
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4, AWS Amplify, react-pdf |
+| Backend | Python 3.13, FastAPI, SQLAlchemy, Alembic, Docling |
+| Data | Postgres 17 with pgvector |
+| AWS | Cognito, S3, EventBridge, SQS, emulated locally by Floci |
+| Models | LM Studio with Qwen3 and Qwen3-Embedding (any OpenAI-compatible API) |
+| Tooling | Terraform, Docker Compose, Langfuse |
 
 ## Limitations
 
