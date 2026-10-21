@@ -23,8 +23,9 @@ htmlcov/
 .venv/
 venv/
 
-# Backend: model downloads
+# Backend: model downloads and the CUAD dataset (atticusprojectai.org/cuad)
 backend/.cache/
+backend/CUAD_v1/
 
 # Docker bind-mounted volumes (service data)
 **/docker/*_data/

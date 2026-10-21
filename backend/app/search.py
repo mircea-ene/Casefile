@@ -3,7 +3,8 @@
     python -m app.search "What is under clause 2.6 in Purpose and Agreement?"
     python -m app.search "..." --document "Lease Agreement.pdf" --all --full
 
-Prints three lists:
+Prints the query analysis (search query, contracts named and the documents they
+resolved to, BM25 terms), then three lists:
 - chunk hits: ✓ = in the top-k above the similarity floor (these pick sections),
   with cosine similarity, rank in vector and full-text search (— = not a
   candidate there) and fused RRF score;
@@ -11,7 +12,8 @@ Prints three lists:
   whether the whole section was sent and why (else only its hit chunks), and how
   many of its chunks went in;
 - what the LLM would get, in prompt order (+ = included because of its section).
-Needs LM Studio running with the embedding model; the LLM isn't called."""
+Needs LM Studio running with the embedding model, and the LLM for query analysis
+(--no-analysis skips it); the answer isn't generated."""
 
 import argparse
 import textwrap
@@ -31,8 +33,10 @@ def main() -> None:
     parser.add_argument("--document", action="append", help="limit to a document filename (repeatable)")
     parser.add_argument("--all", action="store_true", help="show every chunk candidate, not just the top-k hits")
     parser.add_argument("--full", action="store_true", help="print whole chunks instead of a preview")
+    parser.add_argument("--no-analysis", action="store_true", help="search the question as typed (no LLM call)")
     args = parser.parse_args()
     settings = get_settings()
+    settings.query_analysis = settings.query_analysis and not args.no_analysis
 
     with SessionLocal() as db:
         owner = args.owner
@@ -56,15 +60,26 @@ def main() -> None:
 
         total = db.scalar(select(func.count()).select_from(Document).where(Document.owner_id == owner))
         retrieval = retrieve_context(db, owner, args.question, document_ids)
+        names = dict(
+            db.execute(select(Document.id, Document.filename).where(Document.id.in_(retrieval.document_ids or []))).all()
+        )
 
-    hits = retrieval.hits
-    seeds = [h for h in hits if h.source.similarity >= settings.retrieval_min_similarity][: settings.retrieval_top_k]
+    analysis = retrieval.analysis
+    if analysis is not None:
+        print(f"Search query: {analysis.search_query}" + ("" if analysis.analyzed else "  (not analyzed)"))
+        if analysis.contracts:
+            scoped = ", ".join(names.get(i, str(i)) for i in retrieval.document_ids or []) or "all documents"
+            print(f"Contracts named: {analysis.contracts} -> searching {scoped}")
+        print(f"BM25: {analysis.bm25_query or 'skipped (no clause numbers or exact terms)'}\n")
+
+    hits, seeds = retrieval.hits, retrieval.seeds
     seed_ids = {id(h) for h in seeds}
     print(
         f"{len(hits)} chunk candidates from {total} documents; {len(seeds)} hits pick sections "
         f"(top {settings.retrieval_top_k}, similarity >= {settings.retrieval_min_similarity})\n"
     )
-    for n, hit in enumerate(hits if args.all else seeds, start=1):
+    shown = hits if args.all else seeds
+    for n, hit in enumerate(shown, start=1):
         mark = "✓" if id(hit) in seed_ids else " "
         ranks = f"vector #{hit.vector_rank or '—'}  text #{hit.text_rank or '—'}"
         print(f"{mark} {n:>2}. sim {hit.source.similarity:.3f}  {ranks}  rrf {hit.rrf_score:.4f}")

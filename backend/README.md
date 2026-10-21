@@ -17,10 +17,12 @@ The Casefile API and indexing worker, in Python 3.13 with FastAPI, SQLAlchemy an
 
 `POST /chat` (`app/rag.py`):
 
-1. Retrieval runs a vector search (HNSW) and BM25 over the caller's chunks, with BM25 computed in SQL from a weighted `tsvector`. The two rankings are merged with reciprocal rank fusion, and chunks below a cosine similarity floor are dropped.
-2. Sections are scored from their chunk hits and their own embeddings. A section is sent whole when it has two or more hits, when its heading matches the question, when the question names its number, or when its embedding clearly leads. Other sections only contribute the chunks that matched. Everything has to fit a token budget.
-3. The LLM returns JSON with `[n]` markers and one quote per source. A citation is kept only if its quote appears verbatim in that source, and the markers are renumbered to match the citations that are left. If none survive, the response sets `insufficient_evidence`.
-4. The response includes every source that was sent to the model, with its page, section path and bounding boxes, and which `[n]` cites it.
+1. One LLM call analyzes the question (`app/query_analysis.py`). It pulls out the contracts the question names, clause numbers, exact defined terms, and a search query without the names in contract wording. The named contracts are resolved to documents and narrow the search.
+2. Retrieval runs a vector search (HNSW) on the search query, and BM25 on the clause numbers and exact terms when there are any, with BM25 computed in SQL from a weighted `tsvector`. The two rankings are merged with reciprocal rank fusion.
+3. Chunks below a cosine similarity floor are dropped, so a keyword-only match can't produce an answer.
+4. Sections are scored from their chunk hits and their own embeddings. A section is sent whole when it has two or more hits, when its heading matches the question, when the question names its number, or when its embedding clearly leads. Other sections only contribute the chunks that matched. Everything has to fit a token budget.
+5. The LLM returns JSON with `[n]` markers and one quote per source. A citation is kept only if its quote appears verbatim in that source, and the markers are renumbered to match the citations that are left. If none survive, the response sets `insufficient_evidence`.
+6. The response includes every source that was sent to the model, with its page, section path and bounding boxes, and which `[n]` cites it.
 
 Each question and answer is saved as a turn in a conversation. The LLM titles new conversations in the background, and users can rename them.
 

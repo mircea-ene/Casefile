@@ -80,12 +80,22 @@ def embed_query(text: str) -> list[float]:
     return _embed([get_settings().embedding_query_instruction + text], "embed_query")[0]
 
 
-def complete_json(system: str, user: str, schema: dict, name: str = "complete_json") -> dict:
-    """Chat completion constrained to `schema` (LM Studio structured output)."""
-    response = _client().chat.completions.create(
-        model=get_settings().llm_model,
+def complete_json(
+    system: str,
+    user: str,
+    schema: dict,
+    name: str = "complete_json",
+    model: str | None = None,
+    temperature: float = 0.1,
+    timeout: float | None = None,
+) -> dict:
+    """Chat completion constrained to `schema` (LM Studio structured output).
+    `model` defaults to LLM_MODEL; `timeout` (seconds) to the client's 300."""
+    client = _client() if timeout is None else _client().with_options(timeout=timeout)
+    response = client.chat.completions.create(
+        model=model or get_settings().llm_model,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        temperature=0.1,
+        temperature=temperature,
         response_format={
             "type": "json_schema",
             "json_schema": {"name": "response", "strict": True, "schema": schema},

@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     # with a 2048-token context by default and truncates longer input silently).
     section_embed_max_tokens: int = 2000
 
+    # Query analysis (app/query_analysis.py): one LLM call before retrieval that finds
+    # the contracts a question names (used to scope the search), clause numbers and
+    # exact terms (the only BM25 input; without them retrieval is vector-only), and a
+    # search query without the names. Off: the question is searched as typed, BM25 included.
+    query_analysis: bool = True
+    # Defaults to LLM_MODEL; a smaller, faster model is enough here.
+    query_analysis_model: str | None = None
+
     # Langfuse tracing (token usage per user / conversation / request). Off unless both
     # keys are set; the local instance runs in docker-compose (keys in docker/langfuse/langfuse.env).
     langfuse_public_key: str | None = None

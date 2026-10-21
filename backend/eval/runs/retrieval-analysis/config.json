@@ -1,0 +1,13 @@
+{
+  "llm_model": "qwen/qwen3.8-27b",
+  "embedding_model": "text-embedding-qwen3-embedding-8b",
+  "retrieval_top_k": 8,
+  "retrieval_min_similarity": 0.4,
+  "retrieval_token_budget": 6000,
+  "retrieval_only": true,
+  "unscoped": false,
+  "retrieval_mode": "hybrid",
+  "query_analysis": true,
+  "query_analysis_model": "qwen/qwen3.5-9b",
+  "started": "2026-10-21T15:10:27.200181+00:00"
+}

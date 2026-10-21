@@ -2,7 +2,7 @@
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import Text, bindparam, select, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app import ai, tracing
 from app.config import get_settings
 from app.models import Chunk, Document, Section
+from app.query_analysis import QueryAnalysis, analyze, resolve_documents
 from app import schemas
 from app.schemas import ChatAnswer, Citation
 
@@ -125,6 +126,10 @@ ORDER BY sum(idf.idf * f.tf * (:k1 + 1) / (f.tf + :k1 * (1 - :b + :b * m.dl / s.
 LIMIT :limit
 """
 ).bindparams(bindparam("document_ids", type_=ARRAY(UUID(as_uuid=True))))
+
+# search() default: BM25 searches the question itself.
+_SAME_AS_QUESTION: str = "\0same as question"
+
 
 class DocumentNotFound(Exception):
     pass
@@ -241,6 +246,10 @@ class Retrieval:
     hits: list[Hit]  # every fused chunk candidate, best first
     sections: list[SectionPick]  # best first
     sources: list[Source]  # what the LLM gets, in prompt order
+    seeds: list[Hit] = field(default_factory=list)  # the hits that picked sections, best first
+    analysis: QueryAnalysis | None = None
+    # The documents searched: the request's, or the ones the question named.
+    document_ids: list[uuid.UUID] | None = None
 
 
 def retrieve(db: Session, owner_id: str, question: str, document_ids: list[uuid.UUID] | None) -> list[Source]:
@@ -250,8 +259,10 @@ def retrieve(db: Session, owner_id: str, question: str, document_ids: list[uuid.
 def retrieve_context(db: Session, owner_id: str, question: str, document_ids: list[uuid.UUID] | None) -> Retrieval:
     """Hierarchical retrieval: search finds chunks, but the LLM gets whole sections.
 
+    0. Query analysis (app/query_analysis.py) restates the question for search, and
+       the contracts it names narrow `document_ids` to those documents.
     1. The top RETRIEVAL_TOP_K fused chunk hits above the similarity floor, plus
-       the sections whose own embedding matches the question (above the floor),
+       the sections whose own embedding matches the query (above the floor),
        vote for top-level sections: a section scores the sum of its hits' RRF
        scores plus an RRF term for its section-embedding rank.
     2. Sections are taken best first. One that fits RETRIEVAL_TOKEN_BUDGET goes in
@@ -264,9 +275,14 @@ def retrieve_context(db: Session, owner_id: str, question: str, document_ids: li
     unanswerable question into an answer."""
     settings = get_settings()
     if not _has_chunks(db, owner_id, document_ids):
-        return Retrieval([], [], [])
-    query_embedding = ai.embed_query(question)
-    hits = search(db, owner_id, question, document_ids, query_embedding)
+        return Retrieval([], [], [], document_ids=document_ids)
+    with tracing.span("analyze", input=question) as span:
+        analysis = analyze(question)
+        if (resolved := resolve_documents(db, owner_id, analysis.contracts, document_ids)) is not None:
+            document_ids = resolved
+        span.update(output={**vars(analysis), "document_ids": [str(i) for i in document_ids or []] or None})
+    query_embedding = ai.embed_query(analysis.search_query)
+    hits = search(db, owner_id, analysis.search_query, document_ids, query_embedding, bm25_query=analysis.bm25_query)
     seeds = [h for h in hits if h.source.similarity >= settings.retrieval_min_similarity][: settings.retrieval_top_k]
 
     section_distance = Section.embedding.cosine_distance(query_embedding)
@@ -290,7 +306,7 @@ def retrieve_context(db: Session, owner_id: str, question: str, document_ids: li
     for rank, (section_id, _) in enumerate(section_matches, start=1):
         scores[section_id] = scores.get(section_id, 0.0) + 1 / (RRF_K + rank)
     if not scores:
-        return Retrieval(hits, [], [])
+        return Retrieval(hits, [], [], seeds, analysis, document_ids)
 
     rows = db.execute(
         select(Chunk, Document.filename, Chunk.embedding.cosine_distance(query_embedding))
@@ -312,7 +328,8 @@ def retrieve_context(db: Session, owner_id: str, question: str, document_ids: li
         if hit.source.section_id is not None:
             hit_counts[hit.source.section_id] = hit_counts.get(hit.source.section_id, 0) + 1
     labels = {key: path.rsplit(" > ", 1)[-1] for key, path in paths.items() if path}
-    lexemes = _lexemes(db, [question, *labels.values()])
+    expansion_text = analysis.expansion_text
+    lexemes = _lexemes(db, [expansion_text, *labels.values()])
     question_lexemes, label_lexemes = lexemes[0], dict(zip(labels, lexemes[1:]))
     leader = None
     if section_matches and (
@@ -332,7 +349,7 @@ def retrieve_context(db: Session, owner_id: str, question: str, document_ids: li
             hit_counts.get(key, 0),
             labels.get(key),
             label_lexemes.get(key, set()),
-            question,
+            expansion_text,
             question_lexemes,
             key == leader,
         )
@@ -363,7 +380,7 @@ def retrieve_context(db: Session, owner_id: str, question: str, document_ids: li
                 reason,
             )
         )
-    return Retrieval(hits, picks, sources)
+    return Retrieval(hits, picks, sources, seeds, analysis, document_ids)
 
 
 def _expand_reason(
@@ -428,10 +445,12 @@ def search(
     question: str,
     document_ids: list[uuid.UUID] | None,
     query_embedding: list[float] | None = None,
+    bm25_query: str | None = _SAME_AS_QUESTION,
 ) -> list[Hit]:
     """All vector and full-text chunk candidates fused with reciprocal rank fusion,
     best first, unfiltered. Full-text catches exact terms ("Schedule B", "2.6")
-    that embeddings miss."""
+    that embeddings miss. It searches `bm25_query` (by default the question);
+    None skips it, leaving the vector candidates alone."""
     settings = get_settings()
 
     def scoped(query):
@@ -454,7 +473,9 @@ def search(
         scoped(select(Chunk.id)).order_by(distance).limit(settings.retrieval_candidates)
     ).all()
 
-    text_ids = bm25_search(db, owner_id, question, document_ids, settings.retrieval_candidates)
+    if bm25_query is _SAME_AS_QUESTION:
+        bm25_query = question
+    text_ids = bm25_search(db, owner_id, bm25_query, document_ids, settings.retrieval_candidates) if bm25_query else []
 
     vector_rank = {chunk_id: rank for rank, chunk_id in enumerate(vector_ids, start=1)}
     text_rank = {chunk_id: rank for rank, chunk_id in enumerate(text_ids, start=1)}
