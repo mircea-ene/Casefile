@@ -89,19 +89,23 @@ Retrieval was measured on [CUAD](https://www.atticusprojectai.org/cuad), a set o
 
 | Setup | Gold clause in context | MRR@8 | Context tokens | Latency |
 |---|---|---|---|---|
-| Question scoped to its contract, hybrid search | 0.968 | 0.818 | 3,077 | 0.2 s |
-| Same, with query analysis | 0.928 | 0.842 | 2,214 | 2.4 s |
-| Contract named in the question, search over all 40, hybrid | 0.667 | 0.215 | 3,418 | 0.3 s |
-| Same, vector only | 0.723 | 0.275 | 3,124 | 0.3 s |
-| **Same, with query analysis** | **0.932** | **0.821** | 2,595 | 6.1 s |
+| Question names its contract, search over all 40 | 0.932 | 0.821 | 2,595 | 6.1 s |
+| Question scoped to its contract | 0.928 | 0.842 | 2,214 | 2.4 s |
 
-- **Across contracts, query analysis is what makes retrieval work.** Without it, a question like "In the co-hosting agreement between Software.net and Networks Associates, ..." pulls in the preambles and signature blocks of whichever contracts share those words. With it, the question is resolved to the right contract 94% of the time and retrieval matches the scoped run with analysis (0.928).
-- **Within one contract, it costs about four points.** The 9B model's rewrite sometimes drifts from the question, and it adds ordinary words as keywords, which turns BM25 back on. It also cuts the context by 28%.
-- **Ablations within one contract** (vector only 0.952, BM25 only 0.936, no section expansion 0.964) differ by a few questions, so the parts matter mostly across contracts.
-
-Latency was measured locally on LM Studio (Qwen3.5 9B for analysis, Qwen3-Embedding 8B). The 6.1 s average comes mostly from 18 questions on which the analysis model looped until it timed out.
+The analysis model resolves the named contract correctly 94% of the time. Latency was measured locally on LM Studio (Qwen3.5 9B for analysis, Qwen3-Embedding 8B). The 6.1 s average comes mostly from 18 questions on which the analysis model looped until it timed out.
 
 The harness is [`backend/app/evaluate.py`](backend/app/evaluate.py). The questions and the per-question results of every run are in [`backend/eval/`](backend/eval/). CUAD is by The Atticus Project, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+### Compared with the first version
+
+The first version searched the question as typed, with vector search and BM25 on the whole question, fused with RRF.
+
+| Setup | Gold in context, first version | Gold in context, now | MRR@8, first version | MRR@8, now |
+|---|---|---|---|---|
+| Question names its contract, search over all 40 | 0.667 | **0.932** | 0.215 | **0.821** |
+| Question scoped to its contract | **0.968** | 0.928 | 0.818 | **0.842** |
+
+Query analysis now picks the contract a question names and rewrites the question as the clause that would answer it, and BM25 runs only on clause numbers and exact terms. Across contracts this is a large gain: party names no longer pull in the preambles and signature blocks of other contracts. Within one contract it ranks the right clause slightly higher and sends 28% less context, but finds it about four points less often, because the rewrite sometimes drifts from the question.
 
 ## Limitations
 
